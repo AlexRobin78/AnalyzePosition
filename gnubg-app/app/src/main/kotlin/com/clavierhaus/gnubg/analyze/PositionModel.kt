@@ -116,13 +116,14 @@ object Editor {
 
     fun clearBoard(p: Position): Position = p.copy(board = IntArray(50))
 
-    /** Swap the two sides: whoever was on top is now at the bottom. */
+    /** Swap the two sides' checkers: whoever was on top is now at the bottom. The On roll setting is unchanged. */
     fun swapSides(p: Position): Position {
         val b = IntArray(50)
         for (i in 0..24) { b[i] = p.board[25 + i]; b[25 + i] = p.board[i] }
         return p.copy(
             board = b,
-            turn = 1 - p.turn,
+            // turn is left alone: the same side (You / GNU) stays on roll, so the
+            // checkers that are on roll change along with the swap.
             scoreH = p.scoreE,
             scoreE = p.scoreH,
             cubeOwner = when (p.cubeOwner) { 0 -> 1; 1 -> 0; else -> -1 },
