@@ -175,6 +175,9 @@ int gnubg_mobile_current_ids(char *out_pos, int pos_cap,
  * named instances the tutor uses. Fills out_equity[n] and out_moves[n*8].
  * Returns n, 0 when the position has no dice, or -1 on error. */
 int gnubg_mobile_hint_moves(int max_n, float out_equity[], int out_moves[]);
+/* Win / win gammon / win backgammon / lose gammon / lose backgammon of each candidate of
+ * the last hint_moves call, 5 floats per row. Returns the rows copied. */
+int gnubg_mobile_hint_probs(int max_n, float out_probs[]);
 
 /* Engine responds to a human double already on the table (take!=0 -> take). */
 

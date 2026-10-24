@@ -1137,6 +1137,27 @@ Java_com_clavierhaus_gnubg_Engine_hintMoves(JNIEnv *env, jobject thiz, jint maxN
     return (jint) n;
 }
 
+/* Engine.hintProbs(maxN, outProbs): Int
+ * Marshalling only. outProbs must hold maxN*5 floats: win, win gammon, win
+ * backgammon, lose gammon, lose backgammon of each candidate of the last
+ * hintMoves call. Returns the rows written, or -1 on error. */
+JNIEXPORT jint JNICALL
+Java_com_clavierhaus_gnubg_Engine_hintProbs(JNIEnv *env, jobject thiz, jint maxN,
+                                           jfloatArray jProbs) {
+    (void) thiz;
+    float *buf;
+    int n;
+
+    if (maxN < 1 || !jProbs) return (jint) -1;
+    if ((*env)->GetArrayLength(env, jProbs) < maxN * 5) return (jint) -1;
+    buf = (float *) malloc(sizeof(float) * (size_t) maxN * 5);
+    if (!buf) return (jint) -1;
+    n = gnubg_mobile_hint_probs((int) maxN, buf);
+    if (n > 0) (*env)->SetFloatArrayRegion(env, jProbs, 0, n * 5, (const jfloat *) buf);
+    free(buf);
+    return (jint) n;
+}
+
 /* Engine.getMatchState(): IntArray(13) -- one consistent snapshot under one
  * lock, rather than four separate getters that can tear. Marshalling only.
  * Layout is the facade's: [0] gs, [1] fTurn, [2] fMove, [3] dice0, [4] dice1,

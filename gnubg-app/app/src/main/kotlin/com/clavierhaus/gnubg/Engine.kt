@@ -244,6 +244,10 @@ object Engine {
     // the position has no dice, -1 on error.
     external fun hintMoves(maxN: Int, outEquity: FloatArray, outMoves: IntArray): Int
 
+    // Win, win gammon, win backgammon, lose gammon, lose backgammon of each candidate of
+    // the last hintMoves call (maxN * 5 floats, gnubg's cumulative convention). Returns rows.
+    external fun hintProbs(maxN: Int, outProbs: FloatArray): Int
+
     // Restricted GNUbg command bridge for translated Android settings.
     external fun runCommand(command: String): Boolean
 }

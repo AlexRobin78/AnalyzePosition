@@ -535,10 +535,16 @@ private fun ResultsPanel(
     if (r.cubeText != null) {
         Pill("Verdict", rowH, fontSp) { FitText(r.cubeText, fontSp, maxChars = 13) }
         r.cubeWin?.let { w ->
-            Pill("You  W / G / BG %", rowH, fontSp) { FitText(fmtPct(w[0]) + " · " + fmtPct(w[1]) + " · " + fmtPct(w[2]), fontSp, maxChars = 16) }
-            Pill("GNU  W / G / BG %", rowH, fontSp) { FitText(fmtPct(1f - w[0]) + " · " + fmtPct(w[3]) + " · " + fmtPct(w[4]), fontSp, maxChars = 16) }
-            Pill("Cubeless", rowH, fontSp) { FitText(fmtEq(w[5]), fontSp) }
-            Pill("Cubeful", rowH, fontSp) { FitText(fmtEq(w[6]), fontSp) }
+            // gnubg's own chances for the player on roll; gammon figures include backgammons
+            Pill("Win", rowH, fontSp) { FitText(fmtPct(w[0]) + "%", fontSp) }
+            Pill("Gammon win", rowH, fontSp) { FitText(fmtPct(w[1]) + "%", fontSp) }
+            Pill("Backgammon win", rowH, fontSp) { FitText(fmtPct(w[2]) + "%", fontSp) }
+            Pill("Loss", rowH, fontSp) { FitText(fmtPct(1f - w[0]) + "%", fontSp) }
+            Pill("Gammon loss", rowH, fontSp) { FitText(fmtPct(w[3]) + "%", fontSp) }
+            Pill("Backgammon loss", rowH, fontSp) { FitText(fmtPct(w[4]) + "%", fontSp) }
+            Pill("Cubeless equity", rowH, fontSp) { FitText(fmtEq(w[5]), fontSp) }
+            Pill("Cubeful equity", rowH, fontSp) { FitText(fmtEq(w[6]), fontSp) }
+            Note("Chances are for the player on roll. Gammon includes backgammon.", theme, fontSp * 0.8f)
         }
         if (r.cubeDecision != GnubgSession.CUBEDECISION_NOT_AVAILABLE) {
             r.cubeEq?.let { e ->
@@ -566,10 +572,16 @@ private fun ResultsPanel(
         if (cs == null) {
             val best = r.candidates.firstOrNull()?.equity ?: 0f
             r.candidates.forEachIndexed { i, c ->
-                Pill((i + 1).toString() + ". " + c.text, rowH, fontSp, labelWeight = 1.7f, valueWeight = 0.9f) {
-                    FitText(if (i == 0) fmtEq(c.equity) else fmtEq(c.equity - best), fontSp)
+                Pill((i + 1).toString() + ". " + c.text, rowH, fontSp, labelWeight = 1.5f, valueWeight = 1.1f) {
+                    FitText(if (i == 0) fmtEq(c.equity) + "  best" else fmtEq(c.equity) + " (" + fmtEq(c.equity - best) + ")",
+                        fontSp * 0.95f, maxChars = 15)
+                }
+                c.probs?.let { q ->
+                    Note("Win " + fmtPct(q[0]) + " · Gammon " + fmtPct(q[1]) + " · BG " + fmtPct(q[2]) + " %", theme, fontSp * 0.8f)
+                    Note("Loss " + fmtPct(1f - q[0]) + " · Gammon " + fmtPct(q[3]) + " · BG " + fmtPct(q[4]) + " %", theme, fontSp * 0.8f)
                 }
             }
+            Note("Equity is gnubg's cubeful equity for the player on roll. Gammon includes backgammon.", theme, fontSp * 0.8f)
         } else {
             Note("Rollout: " + cs.trials + " games each, cubeful, variance reduced", theme, fontSp)
             cs.cands.forEachIndexed { i, c ->

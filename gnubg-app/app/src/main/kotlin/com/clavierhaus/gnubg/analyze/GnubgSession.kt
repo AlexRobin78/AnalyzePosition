@@ -17,7 +17,8 @@ import java.util.concurrent.Executors
  * All engine calls run on one dedicated thread, one at a time.
  */
 
-data class Candidate(val text: String, val equity: Float)
+/** [probs]: win, win gammon, win backgammon, lose gammon, lose backgammon (gnubg's cumulative convention), for the mover. */
+class Candidate(val text: String, val equity: Float, val probs: FloatArray?)
 data class RolloutCand(val text: String, val equity: Float, val done: Int)
 data class RolloutSnap(
     val active: Boolean, val nCand: Int, val current: Int,
@@ -152,10 +153,15 @@ object GnubgSession {
         val equities = FloatArray(MAX_CANDIDATES)
         val moves = IntArray(MAX_CANDIDATES * 8)
         val n = Engine.hintMoves(MAX_CANDIDATES, equities, moves)
+        val probs = FloatArray(MAX_CANDIDATES * 5)
+        val probRows = if (n > 0) Engine.hintProbs(MAX_CANDIDATES, probs) else 0
         val cands = if (n > 0) {
             (0 until n).map { i ->
                 val mv = IntArray(8) { j -> moves[i * 8 + j] }
-                Candidate(Engine.formatMove(raw, mv), equities[i])
+                Candidate(
+                    Engine.formatMove(raw, mv), equities[i],
+                    if (i < probRows) FloatArray(5) { j -> probs[i * 5 + j] } else null,
+                )
             }
         } else emptyList()
 

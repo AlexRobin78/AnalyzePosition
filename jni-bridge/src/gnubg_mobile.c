@@ -1617,6 +1617,9 @@ int gnubg_mobile_current_ids(char *out_pos, int pos_cap,
  *
  * Returns the number of candidates written (0 if the position has no dice, so
  * there is no chequer play to rank), or -1 on error. */
+#define HINT_PROBS_MAX 16
+static float hint_probs[HINT_PROBS_MAX][5];
+
 int gnubg_mobile_hint_moves(int max_n, float out_equity[], int out_moves[]) {
     movelist ml;
     cubeinfo ci;
@@ -1652,14 +1655,31 @@ int gnubg_mobile_hint_moves(int max_n, float out_equity[], int out_moves[]) {
     n = ml.cMoves;
     if (n > (unsigned int) max_n) n = (unsigned int) max_n;
 
+    memset(hint_probs, 0, sizeof(hint_probs));
     for (i = 0; i < n; i++) {
         out_equity[i] = ml.amMoves[i].rScore;
         memcpy(out_moves + i * 8, ml.amMoves[i].anMove, 8 * sizeof(int));
+        /* the move's own evaluation: win, win gammon, win backgammon, lose gammon,
+         * lose backgammon (gnubg's cumulative convention), for the player moving */
+        if (i < HINT_PROBS_MAX)
+            memcpy(hint_probs[i], ml.amMoves[i].arEvalMove, 5 * sizeof(float));
     }
 
     g_free(ml.amMoves);
     pthread_mutex_unlock(&gnubg_lock);
     return (int) n;
+}
+
+/* The probabilities of the candidates returned by the last gnubg_mobile_hint_moves
+ * call, five floats each. Returns the number of rows copied. */
+int gnubg_mobile_hint_probs(int max_n, float out_probs[]) {
+    int i, n;
+    if (max_n < 1 || !out_probs) return -1;
+    n = max_n < HINT_PROBS_MAX ? max_n : HINT_PROBS_MAX;
+    pthread_mutex_lock(&gnubg_lock);
+    for (i = 0; i < n; i++) memcpy(out_probs + i * 5, hint_probs[i], 5 * sizeof(float));
+    pthread_mutex_unlock(&gnubg_lock);
+    return n;
 }
 
 /* -- Rollouts (Analyse mode's study tool) -----------------------------------
