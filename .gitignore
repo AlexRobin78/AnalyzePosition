@@ -1,0 +1,13 @@
+# native build output (reproducible with build_native_android.sh)
+jni-bridge/build-android-arm64/
+jni-bridge/external/
+glib-android-build/
+.deps/
+gnubg-app/app/src/main/jniLibs/
+*.o
+# gradle / android studio
+gnubg-app/.gradle/
+gnubg-app/build/
+gnubg-app/app/build/
+gnubg-app/local.properties
+.idea/
