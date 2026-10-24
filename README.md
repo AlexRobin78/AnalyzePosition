@@ -15,6 +15,22 @@ and gnubg analyses it:
 All analysis is gnubg's. The app only draws the board and encodes what you set up
 (gnubg's own `idsFromState`, then `SetGNUbgID`, which runs gnubg's `CheckPosition`).
 
+## Bear-off analysis
+
+When all 15 of your checkers are on your home-board points, You are on roll and the dice are
+set, a **Bearoff** button appears in the rail (it is the button that cycles Setup / Results /
+Bearoff). It lists every legal play with:
+
+* **EPC** of the position after the play (expected rolls to bear off x 8.167). With no contact
+  this is the exact one-sided bear-off value (the 54,264 positions are precomputed in
+  `bearoff_race.bin`). With contact it is the average over all scenarios in which you bear
+  off completely without ever leaving a shot (each roll plays the safe move with the lowest
+  race EPC; a roll with no safe move ends that scenario), and the share of scenarios that
+  stay safe is shown.
+* **Shot now** - rolls (of 36) that hit after the play, assuming GNU's checkers stay put.
+* **Next turn** - rolls (of 36) for which every legal play leaves a shot.
+* **Shots as is** - the same count for the position before your play.
+
 ## Changing the position (the "easier" part)
 
 | Gesture | Effect |
@@ -64,7 +80,7 @@ It is signed with the debug key, so it installs directly but is not suitable for
   `MyRaceTheme.kt` (the three MyRace themes), `PositionModel.kt` (editing rules),
   `PositionBoard.kt` (the board), `GnubgSession.kt` (all calls into gnubg),
   `AnalyzeScreen.kt` (rail, board, panels), `Widgets.kt` (pills and buttons).
-* `engine-core/`, `jni-bridge/` — gnubg and its Android bridge, **unmodified** from gnubg-android.
+* `engine-core/`, `jni-bridge/` — gnubg and its Android bridge from gnubg-android. Engine core unmodified; the bridge gained `hintProbs` (the win/gammon/backgammon chances of each candidate play).
 * `build_glib_android.sh`, `build_native_android.sh` — unmodified, except that the last
   line of `build_native_android.sh` (a git-based stamp) is removed.
 
