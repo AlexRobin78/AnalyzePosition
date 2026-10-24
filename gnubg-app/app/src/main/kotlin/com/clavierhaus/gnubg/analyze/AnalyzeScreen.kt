@@ -43,8 +43,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.min
 import androidx.compose.ui.unit.sp
 import com.clavierhaus.gnubg.service.RolloutService
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.max
@@ -58,7 +60,7 @@ import kotlin.math.max
  * or gnubg's verdict for the position on the board. The board is always editable.
  */
 
-private enum class Mode { SETUP, RESULTS }
+private enum class Mode(val label: String) { SETUP("Setup"), RESULTS("Results"), BEAROFF("Bearoff") }
 
 private fun fmtEq(f: Float) = String.format(Locale.US, "%+.3f", f)
 private fun fmtPct(f: Float) = String.format(Locale.US, "%.1f", f * 100f)
@@ -111,6 +113,33 @@ fun AnalyzeScreen() {
             initError = "The gnubg engine could not start: " + (t.message ?: t.javaClass.simpleName)
         }
     }
+
+    // Bear-off analysis: own computation (no gnubg needed), for positions with all 15 checkers home
+    var bearoff by remember { mutableStateOf<BearoffReport?>(null) }
+    var bearoffBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        try {
+            withContext(Dispatchers.Default) {
+                ctx.assets.open("bearoff_race.bin").use { Bearoff.loadTable(it) }
+            }
+        } catch (_: Throwable) { /* without the table the values are solved on demand, just slower */ }
+    }
+    LaunchedEffect(pos) {
+        if (!Bearoff.applies(pos)) { bearoff = null; bearoffBusy = false; return@LaunchedEffect }
+        bearoffBusy = true
+        delay(200)                       // wait for the taps to settle
+        val rep = withContext(Dispatchers.Default) { Bearoff.analyse(pos) }
+        bearoff = rep
+        bearoffBusy = false
+    }
+    val bearoffOk = Bearoff.applies(pos)
+    val availModes = buildList {
+        add(Mode.SETUP)
+        if (result != null) add(Mode.RESULTS)
+        if (bearoffOk) add(Mode.BEAROFF)
+    }
+    val effMode = if (mode in availModes) mode else Mode.SETUP
+    val nextMode = availModes[(availModes.indexOf(effMode) + 1) % availModes.size]
 
     fun clearResultState() {
         rolloutRes = null
@@ -250,9 +279,8 @@ fun AnalyzeScreen() {
                     (candRolling || resNow.cubeText != null || resNow.candidates.isNotEmpty())
                 RailButton(if (candRolling) "Stop" else "Rollout", theme, railBtnH, fontSp,
                     enabled = canRollout) { rollout() }
-                RailButton(if (mode == Mode.SETUP) "Results" else "Setup", theme, railBtnH, fontSp,
-                    enabled = mode == Mode.RESULTS || resNow != null) {
-                    mode = if (mode == Mode.SETUP) Mode.RESULTS else Mode.SETUP
+                RailButton(nextMode.label, theme, railBtnH, fontSp, enabled = availModes.size > 1) {
+                    mode = nextMode
                 }
                 RailButton("Start pos", theme, railBtnH, fontSp) { pos = Position.opening().copy(
                     d0 = pos.d0, d1 = pos.d1, turn = pos.turn, scoreH = pos.scoreH, scoreE = pos.scoreE,
@@ -315,7 +343,7 @@ fun AnalyzeScreen() {
                 }
                 status?.let { ErrorPill(it, rowH, fontSp) }
 
-                if (mode == Mode.SETUP) {
+                if (effMode == Mode.SETUP) {
                     SetupPanel(
                         pos = pos, onPos = { pos = it },
                         editHuman = editHuman, onEditHuman = { editHuman = it },
@@ -339,7 +367,10 @@ fun AnalyzeScreen() {
                             prefs.edit().putInt("theme", themeIdx).apply()
                         },
                         theme = theme, rowH = rowH, fontSp = fontSp * 0.9f,
+                        bearoffAvailable = bearoffOk,
                     )
+                } else if (effMode == Mode.BEAROFF) {
+                    BearoffPanel(bearoff, bearoffBusy, theme, rowH, fontSp * 0.9f)
                 } else {
                     val r = result
                     if (r != null) {
@@ -415,7 +446,9 @@ private fun SetupPanel(
     level: Level, onLevel: () -> Unit,
     themeName: String, onTheme: () -> Unit,
     theme: MyRaceTheme, rowH: Dp, fontSp: Float,
+    bearoffAvailable: Boolean = false,
 ) {
+    if (bearoffAvailable) Note("All 15 checkers are home and you have dice: press Bearoff for the EPC of every play and the shots.", theme, fontSp)
     TapPill("Placing", if (editHuman) "You" else "GNU", rowH, fontSp) { onEditHuman(!editHuman) }
     TapPill("On roll", if (pos.turn == 0) "You" else "GNU", rowH, fontSp) { onPos(pos.copy(turn = 1 - pos.turn)) }
 
@@ -548,4 +581,32 @@ private fun ResultsPanel(
             Note("Seed " + cs.seed + ". The same seed and settings in desktop gnubg reproduce these numbers.", theme, fontSp * 0.85f)
         }
     }
+}
+
+@Composable
+private fun BearoffPanel(
+    report: BearoffReport?, busy: Boolean,
+    theme: MyRaceTheme, rowH: Dp, fontSp: Float,
+) {
+    if (report == null) {
+        Note(if (busy) "Calculating…" else "Needs all 15 of your checkers on your home board points, You on roll, and dice.", theme, fontSp)
+        return
+    }
+    if (busy) Note("Updating…", theme, fontSp)
+    if (report.contact) {
+        Note("GNU can still hit you. EPC is the average over every scenario in which you bear off without ever leaving a shot.", theme, fontSp * 0.9f)
+        Pill("Shots as is", rowH, fontSp) { FitText(report.asIsShots.toString() + " / 36 rolls", fontSp) }
+    } else {
+        Note("No contact: EPC is the exact bear-off value of the position after each play.", theme, fontSp * 0.9f)
+    }
+    report.moves.forEach { m ->
+        Pill(m.text + (if (m.hitsGnu) "  hit" else ""), rowH, fontSp, labelWeight = 1.35f, valueWeight = 1f) {
+            FitText(if (m.epc != null) "EPC " + String.format(Locale.US, "%.2f", m.epc) else "no safe way", fontSp * 0.95f, maxChars = 12)
+        }
+        if (report.contact) {
+            val safe = if (m.pSafe != null) "  ·  safe " + String.format(Locale.US, "%.0f", m.pSafe * 100) + "%" else ""
+            Note("Shot now " + m.shotNow + "/36  ·  next turn " + m.nextShots + "/36" + safe, theme, fontSp * 0.8f)
+        }
+    }
+    Note("Next turn = rolls (of 36) for which every legal play leaves a shot. GNU's checkers are assumed to stay where they are.", theme, fontSp * 0.8f)
 }
