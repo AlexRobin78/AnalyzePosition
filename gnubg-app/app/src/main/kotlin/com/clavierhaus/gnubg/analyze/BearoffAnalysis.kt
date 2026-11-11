@@ -10,15 +10,18 @@ package com.clavierhaus.gnubg.analyze
  *    bear-off exactly (every roll plays the move that minimises the expected rolls).
  *
  *  - With contact (GNU has a checker on the bar or inside your home board, behind
- *    one of your points) the EPC shown is still the race EPC of the position after the
- *    play, so it can be compared with any other EPC tool. Next to it the share of
- *    scenarios in which you bear off completely without ever leaving a shot is
- *    reported: each roll you play the safe move with the lowest race EPC; a roll with
- *    no safe move ends that scenario.
+ *    one of your points) GNU's checkers are assumed to stay put, so every play that
+ *    leaves a shot costs you: each roll you play the safest move (no shot left) with the
+ *    lowest expected remaining rolls, and only when every move leaves a shot do you take
+ *    the best race play (the shot is assumed to miss). The EPC shown is the expected
+ *    rolls of that policy times 8.167, so it is never lower than the plain race EPC,
+ *    which is shown beside it. The share of scenarios in which you bear off without ever
+ *    leaving a shot is reported as well.
  *
- *  - GNU's side of the gammon race: the expected number of rolls GNU needs to bring
- *    every checker into its home board, plus the roll that bears the first one off
- *    (that saves the gammon). Pure race: GNU's entry from the bar is not blocked.
+ *  - GNU's side of the gammon race: the expected number of rolls GNU needs to enter from
+ *    the bar (only through your open points, as they are after your play), bring every
+ *    checker into its home board, plus the roll that bears the first one off (that saves
+ *    the gammon). Your points are taken as they stand after your play.
  *
  *  - Shots: GNU's checkers are assumed to stay where they are. "Shot now" counts the
  *    rolls (of 36) that hit after the play; "next turn" counts the rolls (of 36) for
@@ -34,7 +37,8 @@ private const val NO_PLAY = "no play"
 
 data class BearoffMove(
     val text: String,
-    val epc: Double,           // exact bear-off EPC of the position after the play (a pure race, like any EPC table)
+    val epc: Double,           // headline EPC: with contact the safe-play EPC (never below raceEpc), otherwise the race EPC
+    val raceEpc: Double,       // exact one-sided bear-off EPC of the position after the play, as in any EPC table
     val pSafe: Double?,        // contact only: share of scenarios that bear off without ever leaving a shot
     val shotNow: Int,          // rolls (of 36) that hit after this play
     val nextShots: Int,        // rolls (of 36) next turn that leave a shot whatever you play
@@ -304,75 +308,139 @@ object Bearoff {
         return res
     }
 
+    private val policyMemo = HashMap<Long, Double>()
+
+    /**
+     * Expected rolls to bear off with GNU's checkers fixed: each roll the best play that leaves no shot,
+     * or the best play of all when every play leaves one (that shot is assumed to miss).
+     */
+    private fun safeRolls(my: IntArray, opp: IntArray?): Double {
+        if (isEmpty(my)) return 0.0
+        if (!hasContact(my, opp)) return raceRolls(my)
+        val k = key(my, opp)
+        policyMemo[k]?.let { return it }
+        var total = 0.0
+        var stayW = 0
+        for (r in rolls) {
+            val plays = legalPlays(my, opp, r[0], r[1])
+            val safePlays = plays.filter { hitRolls(it.my, it.opp) == 0 }
+            val pool = if (safePlays.isEmpty()) plays else safePlays
+            if (pool.isEmpty() || (pool.size == 1 && pool[0].text == NO_PLAY)) { stayW += r[2]; continue }
+            var best = Double.MAX_VALUE
+            for (pl in pool) {
+                val e = safeRolls(pl.my, pl.opp ?: opp)
+                if (e < best) best = e
+            }
+            total += r[2] * (1.0 + best)
+        }
+        // rolls with no legal play leave the position unchanged: E = (total + stay) / (36 - stay)
+        val e = (total + stayW) / (36.0 - stayW)
+        policyMemo[k] = e
+        return e
+    }
+
     // ------------------------------------------------------------------ GNU saving the gammon
 
-    private const val GNU_EXACT_MAX = 4                    // checkers still outside: solved exactly up to this many
+    private const val GNU_EXACT_MAX = 4                    // checkers still to bring home (bar included): solved exactly up to this many
     private val gnuMemo = HashMap<Long, Double>()
     private val gnuSimMemo = HashMap<String, Double>()
 
-    /** Pips each GNU checker still needs to reach its home board (largest first); the bar counts 19. */
+    /** Pips each GNU checker that is not on the bar still needs to reach its home board (largest first). */
     private fun gnuDistances(board: IntArray, o: IntArray): IntArray {
         val out = ArrayList<Int>()
-        repeat(o[0]) { out.add(19) }
         for (z in 1..6) repeat(o[z]) { out.add(19 - z) }                       // GNU's checkers on your home points
         for (z in 7..18) repeat(Editor.engineAt(board, z)) { out.add(19 - z) }
         out.sortDescending()
         return out.toIntArray()
     }
 
-    /** Expected rolls until every checker has reached the home board; each roll plays to minimise that. */
-    private fun gnuHomeRolls(d: IntArray): Double {
-        if (d.isEmpty()) return 0.0
-        if (d.size > GNU_EXACT_MAX) return gnuHomeSim(d)
-        var k = d.size.toLong()
+    /** Bit d-1 is set when GNU can enter with a d: you hold fewer than two checkers on your d point. */
+    private fun entryMask(my: IntArray): Int {
+        var m = 0
+        for (d in 1..6) if (my[d] < 2) m = m or (1 shl (d - 1))
+        return m
+    }
+
+    /**
+     * Expected rolls until every GNU checker has reached its home board. Checkers on the bar must enter
+     * first (a die enters only through an open point; the others cannot move meanwhile); each roll plays to
+     * minimise the rest. A bar checker entering with a d is 19 - d pips from home.
+     */
+    private fun gnuHomeRolls(bar: Int, d: IntArray, open: Int): Double {
+        if (bar == 0 && d.isEmpty()) return 0.0
+        if (bar > 0 && open == 0) return Double.POSITIVE_INFINITY
+        if (bar + d.size > GNU_EXACT_MAX) return gnuHomeSim(bar, d, open)
+        var k = open.toLong() * 5 + bar
+        k = k * 5 + d.size
         for (x in d) k = k * 20 + x
         gnuMemo[k]?.let { return it }
         var total = 0.0
+        var stayW = 0
         for (r in rolls) {
-            val dice = if (r[0] == r[1]) intArrayOf(r[0], r[0], r[0], r[0]) else intArrayOf(r[0], r[1])
+            val orders = if (r[0] == r[1]) listOf(intArrayOf(r[0], r[0], r[0], r[0]))
+                         else listOf(intArrayOf(r[0], r[1]), intArrayOf(r[1], r[0]))
             var best = Double.MAX_VALUE
-            fun go(i: Int, cur: IntArray) {
-                if (i == dice.size || cur.isEmpty()) {
-                    val e = gnuHomeRolls(cur)
-                    if (e < best) best = e
-                    return
+            for (dice in orders) {
+                fun go(i: Int, b: Int, cur: IntArray) {
+                    if (i == dice.size || (b == 0 && cur.isEmpty())) {
+                        if (b == bar && cur.contentEquals(d)) return          // nothing changed: handled as a lost roll
+                        val e = gnuHomeRolls(b, cur, open)
+                        if (e < best) best = e
+                        return
+                    }
+                    val die = dice[i]
+                    if (b > 0) {
+                        if (open and (1 shl (die - 1)) == 0) { go(i + 1, b, cur); return }   // blocked: this die is lost
+                        val nd = ArrayList<Int>(cur.size + 1)
+                        for (v in cur) nd.add(v)
+                        nd.add(19 - die)
+                        nd.sortDescending()
+                        go(i + 1, b - 1, nd.toIntArray())
+                        return
+                    }
+                    for (j in cur.indices) {
+                        if (j > 0 && cur[j] == cur[j - 1]) continue           // identical checkers: same move
+                        val nd = ArrayList<Int>(cur.size)
+                        for (t in cur.indices) { val v = if (t == j) cur[t] - die else cur[t]; if (v > 0) nd.add(v) }
+                        nd.sortDescending()
+                        go(i + 1, 0, nd.toIntArray())
+                    }
                 }
-                for (j in cur.indices) {
-                    if (j > 0 && cur[j] == cur[j - 1]) continue           // identical checkers: same move
-                    val nd = ArrayList<Int>(cur.size)
-                    for (t in cur.indices) { val v = if (t == j) cur[t] - dice[i] else cur[t]; if (v > 0) nd.add(v) }
-                    nd.sortDescending()
-                    go(i + 1, nd.toIntArray())
-                }
+                go(0, bar, d)
             }
-            go(0, d)
-            total += r[2] * (1.0 + best)
+            if (best == Double.MAX_VALUE) stayW += r[2] else total += r[2] * (1.0 + best)
         }
-        val e = total / 36.0
+        val e = (total + stayW) / (36.0 - stayW)
         gnuMemo[k] = e
         return e
     }
 
-    /** Many checkers outside: simulate, always moving GNU's furthest checker (fixed seed, so the number is stable). */
-    private fun gnuHomeSim(d: IntArray): Double {
-        val key = d.joinToString(",")
+    /** Many checkers still to come home: simulate (fixed seed, so the number is stable). Enters first, then moves the furthest checker. */
+    private fun gnuHomeSim(bar: Int, d: IntArray, open: Int): Double {
+        val key = bar.toString() + "/" + open + "/" + d.joinToString(",")
         gnuSimMemo[key]?.let { return it }
         val rnd = java.util.Random(20241110L)
         val trials = 4000
-        val cur = IntArray(d.size)
+        val cur = IntArray(d.size + bar)
         var sum = 0L
         repeat(trials) {
             d.copyInto(cur)
-            var left = cur.size
+            var on = d.size
+            var b = bar
+            var left = d.size + bar
             var n = 0
             while (left > 0) {
                 val a = rnd.nextInt(6) + 1
-                val b = rnd.nextInt(6) + 1
-                val dice = if (a == b) intArrayOf(a, a, a, a) else intArrayOf(maxOf(a, b), minOf(a, b))
+                val c = rnd.nextInt(6) + 1
+                val dice = if (a == c) intArrayOf(a, a, a, a) else intArrayOf(maxOf(a, c), minOf(a, c))
                 for (die in dice) {
+                    if (b > 0) {
+                        if (open and (1 shl (die - 1)) != 0) { b--; cur[on++] = 19 - die }
+                        continue
+                    }
                     var j = -1
                     var mx = 0
-                    for (t in cur.indices) if (cur[t] > mx) { mx = cur[t]; j = t }
+                    for (t in 0 until on) if (cur[t] > mx) { mx = cur[t]; j = t }
                     if (j < 0) break
                     cur[j] = maxOf(0, cur[j] - die)
                     if (cur[j] == 0) left--
@@ -386,8 +454,12 @@ object Bearoff {
         return e
     }
 
-    /** Rolls GNU needs to save the gammon: get everything home, then bear one checker off. */
-    fun gnuSaveRolls(board: IntArray, o: IntArray): Double = gnuHomeRolls(gnuDistances(board, o)) + 1.0
+    /**
+     * Rolls GNU needs to save the gammon: enter, get everything home, then bear one checker off.
+     * `my` and `o` are the position after your play; infinite when your board is closed and GNU is on the bar.
+     */
+    fun gnuSaveRolls(board: IntArray, my: IntArray, o: IntArray): Double =
+        gnuHomeRolls(o[0], gnuDistances(board, o), entryMask(my)) + 1.0
 
     // ------------------------------------------------------------------ entry point
 
@@ -414,13 +486,13 @@ object Bearoff {
         val moves = legalPlays(my, opp, p.d0, p.d1).map { pl ->
             val m = pl.my
             val o = pl.opp ?: opp
-            val gnu = if (gnuSaved) null else gnuSaveRolls(p.board, o)
-            val epc = PIPS_PER_ROLL * raceRolls(m)
+            val gnu = if (gnuSaved) null else gnuSaveRolls(p.board, m, o)
+            val race = PIPS_PER_ROLL * raceRolls(m)
             if (!hasContact(m, o)) {
-                BearoffMove(pl.text, epc, null, 0, 0, pl.hit, gnu)
+                BearoffMove(pl.text, race, race, null, 0, 0, pl.hit, gnu)
             } else {
                 val s = safe(m, o)
-                BearoffMove(pl.text, epc, s[0], hitRolls(m, o), shotLeavingRolls(m, o), pl.hit, gnu)
+                BearoffMove(pl.text, PIPS_PER_ROLL * safeRolls(m, o), race, s[0], hitRolls(m, o), shotLeavingRolls(m, o), pl.hit, gnu)
             }
         }.sortedBy { it.epc }
         return BearoffReport(contact, asIs, moves, gnuSaved)
