@@ -370,7 +370,8 @@ fun AnalyzeScreen() {
                         bearoffAvailable = bearoffOk,
                     )
                 } else if (effMode == Mode.BEAROFF) {
-                    BearoffPanel(bearoff, bearoffBusy, theme, rowH, fontSp * 0.9f)
+                    BearoffPanel(bearoff, bearoffBusy, theme, rowH, fontSp * 0.9f,
+                        result?.takeIf { pos.sameAs(it.position) }?.candidates)
                 } else {
                     val r = result
                     if (r != null) {
@@ -599,6 +600,7 @@ private fun ResultsPanel(
 private fun BearoffPanel(
     report: BearoffReport?, busy: Boolean,
     theme: MyRaceTheme, rowH: Dp, fontSp: Float,
+    candidates: List<Candidate>? = null,
 ) {
     if (report == null) {
         Note(if (busy) "Calculating…" else "Needs all your remaining checkers on your home board points, You on roll, and dice.", theme, fontSp)
@@ -611,13 +613,22 @@ private fun BearoffPanel(
     } else {
         Note("No contact: EPC is the exact bear-off value of the position after each play.", theme, fontSp * 0.9f)
     }
-    report.moves.forEach { m ->
+    // order by gnubg's equity (best first) when this position has been analysed; plays gnubg did not list follow by EPC
+    fun moveKey(t: String) = t.trim().split(Regex("\\s+")).sorted().joinToString(" ")
+    val eq = candidates?.associate { moveKey(it.text) to it.equity }
+    val ordered = if (eq.isNullOrEmpty()) report.moves
+        else report.moves.sortedWith(compareBy<BearoffMove> { eq[moveKey(it.text)] == null }
+            .thenByDescending { eq[moveKey(it.text)] ?: 0f }.thenBy { it.epc })
+    Note(if (eq.isNullOrEmpty()) "Plays are ordered by EPC. Press Analyze to order them by gnubg's equity."
+         else "Plays are ordered by gnubg's equity, best first.", theme, fontSp * 0.8f)
+    ordered.forEach { m ->
         Pill(m.text + (if (m.hitsGnu) "  hit" else ""), rowH, fontSp, labelWeight = 1.35f, valueWeight = 1f) {
             FitText("EPC " + String.format(Locale.US, "%.2f", m.epc), fontSp * 0.95f, maxChars = 12)
         }
         if (report.contact) {
             val safe = if (m.pSafe != null) "  ·  safe " + String.format(Locale.US, "%.0f", m.pSafe * 100) + "%" else ""
-            Note("Race EPC " + String.format(Locale.US, "%.2f", m.raceEpc) + "  ·  shot now " + m.shotNow + "/36  ·  next turn " + m.nextShots + "/36" + safe, theme, fontSp * 0.8f)
+            val e = eq?.get(moveKey(m.text))
+            Note((if (e != null) "Equity " + fmtEq(e) + "  ·  " else "") + "Race EPC " + String.format(Locale.US, "%.2f", m.raceEpc) + "  ·  shot now " + m.shotNow + "/36  ·  next turn " + m.nextShots + "/36" + safe, theme, fontSp * 0.8f)
         }
         if (m.gnuRolls != null) {
             val mine = String.format(Locale.US, "%.1f", m.epc) + " (" + String.format(Locale.US, "%.1f", m.epc / PIPS_PER_ROLL) + " rolls)"
