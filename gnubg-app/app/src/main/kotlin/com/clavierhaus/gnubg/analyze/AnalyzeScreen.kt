@@ -448,7 +448,7 @@ private fun SetupPanel(
     theme: MyRaceTheme, rowH: Dp, fontSp: Float,
     bearoffAvailable: Boolean = false,
 ) {
-    if (bearoffAvailable) Note("All 15 checkers are home and you have dice: press Bearoff for the EPC of every play and the shots.", theme, fontSp)
+    if (bearoffAvailable) Note("All your remaining checkers are home and you have dice: press Bearoff for the EPC of every play and the shots.", theme, fontSp)
     TapPill("Placing", if (editHuman) "You" else "GNU", rowH, fontSp) { onEditHuman(!editHuman) }
     TapPill("On roll", if (pos.turn == 0) "You" else "GNU", rowH, fontSp) { onPos(pos.copy(turn = 1 - pos.turn)) }
 

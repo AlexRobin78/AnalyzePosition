@@ -1,7 +1,7 @@
 package com.clavierhaus.gnubg.analyze
 
 /*
- * Bear-off analysis for a position where all 15 of your checkers are in your home
+ * Bear-off analysis for a position where all of your remaining checkers are in your home
  * board and you have dice to play.
  *
  *  - EPC (effective pip count) of the position after each legal play: the expected
@@ -300,12 +300,12 @@ object Bearoff {
 
     // ------------------------------------------------------------------ entry point
 
-    /** Applies when all 15 of your checkers are on your points 1..6, it is your roll and the dice are set. */
+    /** Applies when every checker you still have is on your points 1..6 (some may already be borne off), it is your roll and the dice are set. */
     fun applies(p: Position): Boolean {
         if (!p.hasDice || p.turn != 0) return false
         var n = 0
         for (z in 1..6) n += Editor.humanAt(p.board, z)
-        return n == 15
+        return n > 0 && n == p.humanOnBoard()   // nothing on the bar or outside the home board
     }
 
     @Synchronized
