@@ -606,19 +606,29 @@ private fun BearoffPanel(
     }
     if (busy) Note("Updating…", theme, fontSp)
     if (report.contact) {
-        Note("GNU can still hit you. EPC is the average over every scenario in which you bear off without ever leaving a shot.", theme, fontSp * 0.9f)
+        Note("GNU can still hit you. EPC is the exact bear-off EPC of the position after the play, as in any EPC table. Safe = share of rolls in which you bear off without ever leaving a shot.", theme, fontSp * 0.9f)
         Pill("Shots as is", rowH, fontSp) { FitText(report.asIsShots.toString() + " / 36 rolls", fontSp) }
     } else {
         Note("No contact: EPC is the exact bear-off value of the position after each play.", theme, fontSp * 0.9f)
     }
     report.moves.forEach { m ->
         Pill(m.text + (if (m.hitsGnu) "  hit" else ""), rowH, fontSp, labelWeight = 1.35f, valueWeight = 1f) {
-            FitText(if (m.epc != null) "EPC " + String.format(Locale.US, "%.2f", m.epc) else "no safe way", fontSp * 0.95f, maxChars = 12)
+            FitText("EPC " + String.format(Locale.US, "%.2f", m.epc), fontSp * 0.95f, maxChars = 12)
         }
         if (report.contact) {
             val safe = if (m.pSafe != null) "  ·  safe " + String.format(Locale.US, "%.0f", m.pSafe * 100) + "%" else ""
             Note("Shot now " + m.shotNow + "/36  ·  next turn " + m.nextShots + "/36" + safe, theme, fontSp * 0.8f)
         }
+        if (m.gnuRolls != null) {
+            Note(
+                "Gammon race: GNU needs EPC " + String.format(Locale.US, "%.1f", m.gnuRolls * PIPS_PER_ROLL) +
+                    " (" + String.format(Locale.US, "%.1f", m.gnuRolls) + " rolls) to save it, you need " +
+                    String.format(Locale.US, "%.1f", m.epc) + " (" + String.format(Locale.US, "%.1f", m.epc / PIPS_PER_ROLL) + " rolls)",
+                theme, fontSp * 0.8f,
+            )
+        }
     }
     Note("Next turn = rolls (of 36) for which every legal play leaves a shot. GNU's checkers are assumed to stay where they are.", theme, fontSp * 0.8f)
+    if (report.gnuSaved) Note("GNU has already borne a checker off, so there is no gammon to play for.", theme, fontSp * 0.8f)
+    else Note("GNU's gammon-saving EPC = expected rolls to bring every checker home (best play each roll) plus the roll that bears one off, times 8.167. Pure race: it ignores your points blocking GNU's entry from the bar.", theme, fontSp * 0.8f)
 }

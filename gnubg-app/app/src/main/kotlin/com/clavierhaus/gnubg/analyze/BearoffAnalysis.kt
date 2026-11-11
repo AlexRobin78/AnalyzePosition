@@ -10,11 +10,15 @@ package com.clavierhaus.gnubg.analyze
  *    bear-off exactly (every roll plays the move that minimises the expected rolls).
  *
  *  - With contact (GNU has a checker on the bar or inside your home board, behind
- *    one of your points), the EPC is the average over every scenario in which you
- *    bear off completely without ever leaving a shot: each roll you play the
- *    safe move with the lowest race EPC; a roll with no safe move ends that scenario
- *    (it is left out of the average). The share of scenarios that stay safe is
- *    reported too.
+ *    one of your points) the EPC shown is still the race EPC of the position after the
+ *    play, so it can be compared with any other EPC tool. Next to it the share of
+ *    scenarios in which you bear off completely without ever leaving a shot is
+ *    reported: each roll you play the safe move with the lowest race EPC; a roll with
+ *    no safe move ends that scenario.
+ *
+ *  - GNU's side of the gammon race: the expected number of rolls GNU needs to bring
+ *    every checker into its home board, plus the roll that bears the first one off
+ *    (that saves the gammon). Pure race: GNU's entry from the bar is not blocked.
  *
  *  - Shots: GNU's checkers are assumed to stay where they are. "Shot now" counts the
  *    rolls (of 36) that hit after the play; "next turn" counts the rolls (of 36) for
@@ -30,17 +34,19 @@ private const val NO_PLAY = "no play"
 
 data class BearoffMove(
     val text: String,
-    val epc: Double?,          // null: no safe bear-off exists
-    val pSafe: Double?,        // contact only: share of scenarios that bear off without a shot
+    val epc: Double,           // exact bear-off EPC of the position after the play (a pure race, like any EPC table)
+    val pSafe: Double?,        // contact only: share of scenarios that bear off without ever leaving a shot
     val shotNow: Int,          // rolls (of 36) that hit after this play
     val nextShots: Int,        // rolls (of 36) next turn that leave a shot whatever you play
     val hitsGnu: Boolean,
+    val gnuRolls: Double? = null,   // GNU: expected rolls until it has borne off a checker (the gammon is saved); null when it already has
 )
 
 data class BearoffReport(
     val contact: Boolean,
     val asIsShots: Int,        // rolls (of 36) that would leave a shot from the position as it stands
     val moves: List<BearoffMove>,
+    val gnuSaved: Boolean = false,       // GNU has already borne a checker off: no gammon to play for
 )
 
 object Bearoff {
@@ -90,7 +96,7 @@ object Bearoff {
 
     private fun keyMy(my: IntArray): Long {
         var k = 0L
-        for (p in 1..6) k = k * 16 + my[p]
+        for (p in 6 downTo 1) k = k * 16 + my[p]   // 6 point outermost, ace innermost: the order of the table
         return k
     }
 
@@ -298,6 +304,91 @@ object Bearoff {
         return res
     }
 
+    // ------------------------------------------------------------------ GNU saving the gammon
+
+    private const val GNU_EXACT_MAX = 4                    // checkers still outside: solved exactly up to this many
+    private val gnuMemo = HashMap<Long, Double>()
+    private val gnuSimMemo = HashMap<String, Double>()
+
+    /** Pips each GNU checker still needs to reach its home board (largest first); the bar counts 19. */
+    private fun gnuDistances(board: IntArray, o: IntArray): IntArray {
+        val out = ArrayList<Int>()
+        repeat(o[0]) { out.add(19) }
+        for (z in 1..6) repeat(o[z]) { out.add(19 - z) }                       // GNU's checkers on your home points
+        for (z in 7..18) repeat(Editor.engineAt(board, z)) { out.add(19 - z) }
+        out.sortDescending()
+        return out.toIntArray()
+    }
+
+    /** Expected rolls until every checker has reached the home board; each roll plays to minimise that. */
+    private fun gnuHomeRolls(d: IntArray): Double {
+        if (d.isEmpty()) return 0.0
+        if (d.size > GNU_EXACT_MAX) return gnuHomeSim(d)
+        var k = d.size.toLong()
+        for (x in d) k = k * 20 + x
+        gnuMemo[k]?.let { return it }
+        var total = 0.0
+        for (r in rolls) {
+            val dice = if (r[0] == r[1]) intArrayOf(r[0], r[0], r[0], r[0]) else intArrayOf(r[0], r[1])
+            var best = Double.MAX_VALUE
+            fun go(i: Int, cur: IntArray) {
+                if (i == dice.size || cur.isEmpty()) {
+                    val e = gnuHomeRolls(cur)
+                    if (e < best) best = e
+                    return
+                }
+                for (j in cur.indices) {
+                    if (j > 0 && cur[j] == cur[j - 1]) continue           // identical checkers: same move
+                    val nd = ArrayList<Int>(cur.size)
+                    for (t in cur.indices) { val v = if (t == j) cur[t] - dice[i] else cur[t]; if (v > 0) nd.add(v) }
+                    nd.sortDescending()
+                    go(i + 1, nd.toIntArray())
+                }
+            }
+            go(0, d)
+            total += r[2] * (1.0 + best)
+        }
+        val e = total / 36.0
+        gnuMemo[k] = e
+        return e
+    }
+
+    /** Many checkers outside: simulate, always moving GNU's furthest checker (fixed seed, so the number is stable). */
+    private fun gnuHomeSim(d: IntArray): Double {
+        val key = d.joinToString(",")
+        gnuSimMemo[key]?.let { return it }
+        val rnd = java.util.Random(20241110L)
+        val trials = 4000
+        val cur = IntArray(d.size)
+        var sum = 0L
+        repeat(trials) {
+            d.copyInto(cur)
+            var left = cur.size
+            var n = 0
+            while (left > 0) {
+                val a = rnd.nextInt(6) + 1
+                val b = rnd.nextInt(6) + 1
+                val dice = if (a == b) intArrayOf(a, a, a, a) else intArrayOf(maxOf(a, b), minOf(a, b))
+                for (die in dice) {
+                    var j = -1
+                    var mx = 0
+                    for (t in cur.indices) if (cur[t] > mx) { mx = cur[t]; j = t }
+                    if (j < 0) break
+                    cur[j] = maxOf(0, cur[j] - die)
+                    if (cur[j] == 0) left--
+                }
+                n++
+            }
+            sum += n
+        }
+        val e = sum.toDouble() / trials
+        gnuSimMemo[key] = e
+        return e
+    }
+
+    /** Rolls GNU needs to save the gammon: get everything home, then bear one checker off. */
+    fun gnuSaveRolls(board: IntArray, o: IntArray): Double = gnuHomeRolls(gnuDistances(board, o)) + 1.0
+
     // ------------------------------------------------------------------ entry point
 
     /** Applies when every checker you still have is on your points 1..6 (some may already be borne off), it is your roll and the dice are set. */
@@ -317,21 +408,21 @@ object Bearoff {
         opp[0] = p.board[24]
         for (z in 1..6) opp[z] = Editor.engineAt(p.board, z)
         val contact = hasContact(my, opp)
-        val oppUse: IntArray? = if (contact) opp else null
 
         val asIs = if (contact) shotLeavingRolls(my, opp) else 0
+        val gnuSaved = p.engineOff() > 0
         val moves = legalPlays(my, opp, p.d0, p.d1).map { pl ->
             val m = pl.my
             val o = pl.opp ?: opp
-            val c = hasContact(m, o)
-            if (!c) {
-                BearoffMove(pl.text, PIPS_PER_ROLL * raceRolls(m), null, 0, 0, pl.hit)
+            val gnu = if (gnuSaved) null else gnuSaveRolls(p.board, o)
+            val epc = PIPS_PER_ROLL * raceRolls(m)
+            if (!hasContact(m, o)) {
+                BearoffMove(pl.text, epc, null, 0, 0, pl.hit, gnu)
             } else {
                 val s = safe(m, o)
-                val epc = if (s[0] > 1e-12) PIPS_PER_ROLL * s[1] / s[0] else null
-                BearoffMove(pl.text, epc, s[0], hitRolls(m, o), shotLeavingRolls(m, o), pl.hit)
+                BearoffMove(pl.text, epc, s[0], hitRolls(m, o), shotLeavingRolls(m, o), pl.hit, gnu)
             }
-        }.sortedWith(compareBy({ it.epc == null }, { it.epc ?: 0.0 }))
-        return BearoffReport(contact, asIs, moves)
+        }.sortedBy { it.epc }
+        return BearoffReport(contact, asIs, moves, gnuSaved)
     }
 }
