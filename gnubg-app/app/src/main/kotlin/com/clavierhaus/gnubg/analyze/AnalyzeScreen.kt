@@ -114,7 +114,7 @@ fun AnalyzeScreen() {
         }
     }
 
-    // Bear-off analysis: own computation (no gnubg needed), for positions with all 15 checkers home
+    // Bear-off analysis: own computation (no gnubg needed), for positions with all remaining checkers home
     var bearoff by remember { mutableStateOf<BearoffReport?>(null) }
     var bearoffBusy by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) {
@@ -601,7 +601,7 @@ private fun BearoffPanel(
     theme: MyRaceTheme, rowH: Dp, fontSp: Float,
 ) {
     if (report == null) {
-        Note(if (busy) "Calculating…" else "Needs all 15 of your checkers on your home board points, You on roll, and dice.", theme, fontSp)
+        Note(if (busy) "Calculating…" else "Needs all your remaining checkers on your home board points, You on roll, and dice.", theme, fontSp)
         return
     }
     if (busy) Note("Updating…", theme, fontSp)
